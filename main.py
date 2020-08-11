@@ -20,6 +20,7 @@ async def main():
     logger.info("等待数据")
     for data in consumer:
         logger.info(f"开始抓取 {data.value['id']}")
+        await asyncio.sleep(random.randint(0,5))
         await download_related(data.value)
 
 
@@ -32,8 +33,12 @@ def sendData(px_id: int):
 async def download_related(illust: Dict):
     related_data = await loop.run_in_executor(executor, related_task, illust["id"])
     if "illusts" not in related_data:
-        logger.error("未知错误")
-        logger.error(related_data)
+        if "error" in related_data:
+            logger.error(related_data)
+            logger.error("达到频率限制，sleep两分钟")
+            await asyncio.sleep(160)
+        else:
+            logger.error(related_data)
         return
     await processIllustList(related_data["illusts"])
     for illust in related_data["illusts"]:  # 将关联作品放入队列
