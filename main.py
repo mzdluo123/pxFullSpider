@@ -7,6 +7,7 @@ from typing import Dict, List
 import datetime
 import time
 from kf import producer, consumer, TOPIC
+import random
 
 
 async def main():
@@ -14,22 +15,29 @@ async def main():
         data = await loop.run_in_executor(executor, recommended_task, page)
         await processIllustList(data["illusts"])  # 作品放入数据库
         for illust in data["illusts"]:  # 将关联作品放入队列
-            logger.info(f"正在将 {illust['id']} 放入队列")
-            future = producer.send(TOPIC, {"id": illust["id"]}, partition=0)
-            logger.info(future.get(timeout=10))
+            sendData(illust['id'])
         await asyncio.sleep(1)
-
-    for data in consumer:  # 搜索推荐数据
+    logger.info("等待数据")
+    for data in consumer:
         logger.info(f"开始抓取 {data.value['id']}")
         await download_related(data.value)
 
 
+def sendData(px_id: int):
+    logger.info(f"正在将 {px_id} 放入队列")
+    future = producer.send(TOPIC, {"id": px_id})
+    logger.info(future.get(timeout=1000))
+
+
 async def download_related(illust: Dict):
     related_data = await loop.run_in_executor(executor, related_task, illust["id"])
+    if "illusts" not in related_data:
+        logger.error("未知错误")
+        logger.error(related_data)
+        return
     await processIllustList(related_data["illusts"])
     for illust in related_data["illusts"]:  # 将关联作品放入队列
-        future = producer.send(TOPIC, {"id": illust["id"]}, partition=0)
-        logger.info(future.get(timeout=10))
+        sendData(illust["id"])
 
 
 def recommended_task(page: int) -> Dict:
@@ -82,23 +90,28 @@ async def parseTag(tags: Dict) -> List[Tag]:
 
 
 async def processIllustList(illusts: List):
+    if db.is_closed():
+        db.connect()
     for i in illusts:
         id = i["id"]
         if Work.get_or_none(Work.px_id == id) is None:
-            user = await parseUser(i["user"])
-            tags = await parseTag(i["tags"])
-            work = await parseWork(i)
-            db_user = User.get_or_none(User.px_id == user.px_id)
-            if db_user is None:
-                user.save()
-                db_user = user
-                logger.success(f"新建用户 {user.name} 成功")
-            tags_id = [Tag.get_or_create(name=tag.name, translated_name=tag.translated_name) for tag in tags]
-            work.user = db_user
-            work.save()
-            logger.success(f"新建作品 {work.title} 成功")
-            tags_data = [(work.id, tag[0].id) for tag in tags_id]
-            TagLink.insert_many(tags_data, fields=[TagLink.work, TagLink.tag]).execute()
+            with db.atomic() as t:
+                user = await parseUser(i["user"])
+                tags = await parseTag(i["tags"])
+                work = await parseWork(i)
+                db_user = User.get_or_none(User.px_id == user.px_id)
+                if db_user is None:
+                    user.save()
+                    db_user = user
+                    logger.success(f"新建用户 {user.name} 成功")
+                tags_id = [Tag.get_or_create(name=tag.name, translated_name=tag.translated_name) for tag in tags]
+                work.user = db_user
+                work.save()
+                logger.success(f"新建作品 {work.title} 成功")
+                tags_data = [(work.id, tag[0].id) for tag in tags_id]
+                TagLink.insert_many(tags_data, fields=[TagLink.work, TagLink.tag]).execute()
+                t.commit()
+    db.close()
 
 
 if __name__ == '__main__':
