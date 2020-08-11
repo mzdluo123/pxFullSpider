@@ -13,21 +13,24 @@ import random
 async def main():
     for page in range(3):
         data = await loop.run_in_executor(executor, recommended_task, page)
-        await processIllustList(data["illusts"])  # 作品放入数据库
         for illust in data["illusts"]:  # 将关联作品放入队列
             sendData(illust['id'])
+        await processIllustList(data["illusts"])  # 作品放入数据库
         await asyncio.sleep(1)
     logger.info("等待数据")
     for data in consumer:
         logger.info(f"开始抓取 {data.value['id']}")
-        await asyncio.sleep(random.randint(0,5))
-        await download_related(data.value)
+        await asyncio.sleep(random.randint(0, 3))
+        loop.create_task(download_related(data.value))
 
 
 def sendData(px_id: int):
-    logger.info(f"正在将 {px_id} 放入队列")
-    future = producer.send(TOPIC, {"id": px_id})
-    logger.info(future.get(timeout=1000))
+    if Work.get_or_none(Work.px_id == px_id) is None:
+        logger.info(f"正在将 {px_id} 放入队列")
+        future = producer.send(TOPIC, {"id": px_id})
+        logger.info(future.get(timeout=1000))
+    else:
+        logger.warning(f"{px_id} 已存在")
 
 
 async def download_related(illust: Dict):
@@ -37,6 +40,7 @@ async def download_related(illust: Dict):
             logger.error(related_data)
             logger.error("达到频率限制，sleep两分钟")
             await asyncio.sleep(160)
+            api.login(CONF.PIXIV_USER, CONF.PIXIV_PWD)
         else:
             logger.error(related_data)
         return
