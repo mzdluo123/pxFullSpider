@@ -6,46 +6,50 @@ from model import *
 from typing import Dict, List
 import datetime
 import time
+from kf import producer, consumer, TOPIC
 
 
 async def main():
-    recommended_params = {}
-    while recommended_params is not None:
-        data = await loop.run_in_executor(executor, recommended_task, recommended_params)
-        await processIllustList(data["illusts"])
-        download_related(data["illusts"])
-        recommended_params = api.parse_qs(data["next_url"])
+    for page in range(3):
+        data = await loop.run_in_executor(executor, recommended_task, page)
+        await processIllustList(data["illusts"])  # 作品放入数据库
+        for illust in data["illusts"]:  # 将关联作品放入队列
+            logger.info(f"正在将 {illust['id']} 放入队列")
+            future = producer.send(TOPIC, {"id": illust["id"]}, partition=0)
+            logger.info(future.get(timeout=10))
+        await asyncio.sleep(1)
+
+    for data in consumer:  # 搜索推荐数据
+        logger.info(f"开始抓取 {data.value['id']}")
+        await download_related(data.value)
 
 
-def download_related(illusts: List):
-    for illust in illusts:
-        related_params = {"illust_id": illust["id"]}
-        while related_params is not None:
-            related_data = await loop.run_in_executor(executor, related_task, related_params)
-            related_params = api.parse_qs(related_params["next_url"])
-            download_related(related_data["illusts"])
+async def download_related(illust: Dict):
+    related_data = await loop.run_in_executor(executor, related_task, illust["id"])
+    await processIllustList(related_data["illusts"])
+    for illust in related_data["illusts"]:  # 将关联作品放入队列
+        future = producer.send(TOPIC, {"id": illust["id"]}, partition=0)
+        logger.info(future.get(timeout=10))
 
 
-def recommended_task(params: Dict) -> Dict:
+def recommended_task(page: int) -> Dict:
     try:
         logger.info("正在下载推荐。。。")
-        if len(params) == 0:
-            return api.illust_recommended()
-        return api.illust_recommended(**params)
+        return api.illust_recommended(offset=page)
     except Exception as e:
         logger.error(f"发生错误 {e} 正在重试")
         time.sleep(20)
-        return recommended_task(**params)
+        return recommended_task(page)
 
 
-def related_task(params: Dict) -> Dict:
+def related_task(work_id: int) -> Dict:
     try:
-        logger.info("正在下载相关。。。")
-        return api.illust_related(**params)
+        logger.info(f"正在下载{work_id}相关。。。")
+        return api.illust_related(work_id)
     except Exception as e:
         logger.error(f"发生错误 {e} 正在重试")
         time.sleep(20)
-        return related_task(**params)
+        return related_task(work_id)
 
 
 async def parseWork(illust: Dict) -> Work:
