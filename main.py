@@ -13,8 +13,6 @@ import random
 async def main():
     for page in range(3):
         data = await loop.run_in_executor(executor, recommended_task, page)
-        for illust in data["illusts"]:  # 将关联作品放入队列
-            sendData(illust['id'])
         await processIllustList(data["illusts"])  # 作品放入数据库
         await asyncio.sleep(1)
     logger.info("等待数据")
@@ -26,7 +24,7 @@ async def main():
 
 def sendData(px_id: int):
     if Work.get_or_none(Work.px_id == px_id) is None:
-        logger.info(f"正在将 {px_id} 放入队列")
+        logger.success(f"正在将 {px_id} 放入队列")
         future = producer.send(TOPIC, {"id": px_id})
         logger.info(future.get(timeout=1000))
     else:
@@ -39,14 +37,12 @@ async def download_related(illust: Dict):
         if "error" in related_data:
             logger.error(related_data)
             logger.error("达到频率限制，sleep两分钟")
-            await asyncio.sleep(160)
+            time.sleep(160)
             api.login(CONF.PIXIV_USER, CONF.PIXIV_PWD)
         else:
             logger.error(related_data)
         return
     await processIllustList(related_data["illusts"])
-    for illust in related_data["illusts"]:  # 将关联作品放入队列
-        sendData(illust["id"])
 
 
 def recommended_task(page: int) -> Dict:
@@ -102,8 +98,9 @@ async def processIllustList(illusts: List):
     if db.is_closed():
         db.connect()
     for i in illusts:
-        id = i["id"]
-        if Work.get_or_none(Work.px_id == id) is None:
+        px_id = i["id"]
+        if Work.get_or_none(Work.px_id == px_id) is None:
+            sendData(px_id)
             with db.atomic() as t:
                 user = await parseUser(i["user"])
                 tags = await parseTag(i["tags"])
