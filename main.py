@@ -9,6 +9,7 @@ from loguru import logger
 from pixivpy3 import *
 
 from kf import producer, consumer, TOPIC
+from kafka.errors import CommitFailedError
 from model import *
 
 
@@ -19,15 +20,24 @@ async def main():
         await asyncio.sleep(1)
     logger.info("等待数据")
     while True:
-        partition = consumer.poll(max_records=10)
+        partition = consumer.poll(max_records=3)
         for k, v in partition.items():
             logger.info(f"获取到Partition {k.partition}")
             logger.debug(f"获取到 {len(v)}个任务")
             for j in v:
+                await asyncio.sleep(1)
                 loop.create_task(download_related(j.value))
-        await asyncio.sleep(random.randint(0, 3))
+        await asyncio.sleep(random.randint(0, 2))
+        await commit()
         logger.debug(f"成功提交")
+
+
+async def commit():
+    try:
         consumer.commit()
+    except CommitFailedError as e:
+        logger.error(f"提交失败 {e}")
+        await asyncio.sleep(4)
 
 
 def sendData(px_id: int):
@@ -75,7 +85,10 @@ async def parseWork(illust: Dict) -> Work:
     work.px_id = illust["id"]
     work.title = illust["title"]
     work.type = illust["type"]
-    work.large_download_url = illust["image_urls"]["large"]
+    if len(illust['meta_single_page']) != 0:
+        work.large_download_url = illust['meta_single_page']['original_image_url']
+    else:
+        work.large_download_url = illust['meta_pages'][0]['image_urls']['original']
     work.create_date = datetime.datetime.strptime(illust["create_date"], "%Y-%m-%dT%H:%M:%S%z")
     work.width = illust["width"]
     work.height = illust["height"]
