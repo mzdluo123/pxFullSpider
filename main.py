@@ -1,34 +1,39 @@
 import asyncio
-from pixivpy3 import *
-from loguru import logger
-from concurrent.futures import ThreadPoolExecutor
-from model import *
-from typing import Dict, List
 import datetime
-import time
-from kf import producer, consumer, TOPIC
 import random
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List
+
+from loguru import logger
+from pixivpy3 import *
+
+from kf import producer, consumer, TOPIC
+from model import *
 
 
 async def main():
-    for page in range(3):
+    for page in range(5):
         data = await loop.run_in_executor(executor, recommended_task, page)
         await processIllustList(data["illusts"])  # 作品放入数据库
         await asyncio.sleep(1)
     logger.info("等待数据")
-    for data in consumer:
-        logger.info(f"开始抓取 {data.value['id']}")
+    while True:
+        partition = consumer.poll(max_records=10)
+        for k, v in partition.items():
+            logger.info(f"获取到Partition {k.partition}")
+            logger.debug(f"获取到 {len(v)}个任务")
+            for j in v:
+                loop.create_task(download_related(j.value))
         await asyncio.sleep(random.randint(0, 3))
-        loop.create_task(download_related(data.value))
+        logger.debug(f"成功提交")
+        consumer.commit()
 
 
 def sendData(px_id: int):
-    if Work.get_or_none(Work.px_id == px_id) is None:
-        logger.success(f"正在将 {px_id} 放入队列")
-        future = producer.send(TOPIC, {"id": px_id})
-        logger.info(future.get(timeout=1000))
-    else:
-        logger.warning(f"{px_id} 已存在")
+    logger.success(f"正在将 {px_id} 放入队列")
+    future = producer.send(TOPIC, {"id": px_id})
+    logger.info(future.get(timeout=1000))
 
 
 async def download_related(illust: Dict):
@@ -117,6 +122,8 @@ async def processIllustList(illusts: List):
                 tags_data = [(work.id, tag[0].id) for tag in tags_id]
                 TagLink.insert_many(tags_data, fields=[TagLink.work, TagLink.tag]).execute()
                 t.commit()
+        else:
+            logger.warning(f"{px_id} 已存在")
     db.close()
 
 
