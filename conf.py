@@ -2,8 +2,8 @@ import json
 
 
 class Conf:
-    def __init__(self):
-        with open("conf.json", "r") as file:
+    def load_data(self, file_path: str = "conf.json"):
+        with open(file_path, "r") as file:
             _data = json.loads(file.read())
 
         self.DB_Host = _data["dbHost"]

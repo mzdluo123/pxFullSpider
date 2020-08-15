@@ -1,3 +1,12 @@
+import sys
+from loguru import logger
+from conf import CONF
+if len(sys.argv) != 1:
+    CONF.load_data(sys.argv[1])
+    logger.warning(f"已加载配置文件 {sys.argv[1]}")
+else:
+    CONF.load_data()
+
 import asyncio
 import datetime
 import random
@@ -5,8 +14,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List
 
-from loguru import logger
 from pixivpy3 import *
+
 
 from kf import producer, consumer, TOPIC
 from kafka.errors import CommitFailedError
@@ -20,7 +29,7 @@ async def main():
         await asyncio.sleep(1)
     logger.info("等待数据")
     while True:
-        partition = consumer.poll(max_records=3)
+        partition = consumer.poll(max_records=5)
         for k, v in partition.items():
             logger.info(f"获取到Partition {k.partition}")
             logger.debug(f"获取到 {len(v)}个任务")
@@ -50,6 +59,9 @@ async def download_related(illust: Dict):
     related_data = await loop.run_in_executor(executor, related_task, illust["id"])
     if "illusts" not in related_data:
         if "error" in related_data:
+            if related_data["error"]["user_message"] == "该作品已被删除，或作品ID不存在。":
+                logger.error("作品不存在")
+                return
             logger.error(related_data)
             logger.error("达到频率限制，sleep两分钟")
             time.sleep(160)

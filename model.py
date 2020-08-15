@@ -1,7 +1,10 @@
 from peewee import *
+from playhouse.pool import PooledMySQLDatabase
 from conf import CONF
 
-db = MySQLDatabase(CONF.DB_NAME, user=CONF.DB_USER, password=CONF.DB_PWD, host=CONF.DB_Host)
+db = PooledMySQLDatabase(CONF.DB_NAME, user=CONF.DB_USER, password=CONF.DB_PWD, host=CONF.DB_Host,
+                         max_connections=32,
+                         stale_timeout=300)
 
 
 class BaseModel(Model):
