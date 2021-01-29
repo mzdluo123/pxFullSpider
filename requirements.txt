@@ -1,6 +1,4 @@
-kafka-python
-peewee
 requests
 pixivpy
 loguru
-pymysql
+asyncpg
