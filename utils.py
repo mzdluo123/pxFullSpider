@@ -18,3 +18,10 @@ def async_in_pool(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
         return result
 
     return _wrapper
+
+
+class Task:
+    def __init__(self, task_type, content=None, pxid=None):
+        self.type = task_type
+        self.content = content
+        self.pxid = pxid

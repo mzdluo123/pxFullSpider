@@ -7,9 +7,7 @@ from pixivpy3 import ByPassSniApi, AppPixivAPI
 import time
 import random
 from conf import CONF
-from utils import async_in_pool
-
-task_queue = Queue()
+from utils import async_in_pool, Task
 
 if len(sys.argv) != 1:
     CONF.load_data(sys.argv[1])
@@ -18,43 +16,44 @@ else:
     CONF.load_data()
 
 
-class Task:
-    def __init__(self, task_type, content):
-        self.type = task_type
-        self.content = content
-
-
 async def main():
     page = 1
     while True:
-        if task_queue.empty():
+
+        if await DB.count_task() == 0:
             tasks = await recommend_tasks(page)
             page += 1
             logger.info(f"获取了 {len(tasks)} 个任务")
             for i in await DB.clean_tasks(tasks):
-                task_queue.put(i)
+                await DB.submit_task(i)
         bench = []
-        logger.info(f"队列剩余{task_queue.qsize()}")
+        logger.info(f"队列剩余{await DB.count_task()}")
         for i in range(3):
-            task = task_queue.get_nowait()
-            if task is None:
-                break
-            if task.type == "related":
-                bench.append(related_task(task.content))
-                continue
-            if task.type == "user":
-                bench.append(user_tasks(task.content))
-                continue
-            if task.type == "work":
-                bench.append(process_work(task.content))
-                continue
+
+            async def __job():
+                task, finish = await DB.get_task()
+                if task is None:
+                    return
+                logger.info(f"处理任务 {task.type}")
+                if task.type == "related":
+                    await related_task(task.pxid)
+                    await finish()
+                    return
+                if task.type == "user":
+                    await user_tasks(task.pxid)
+                    await finish()
+                    return
+                if task.type == "work":
+                    await process_work(task.content)
+                    await finish()
+
+            bench.append(__job())
 
         results = await asyncio.gather(*bench)
         for i in results:
             if i is None:
                 break
-            for task in await DB.clean_tasks(i):
-                task_queue.put(task)
+            await DB.submit_task(*await DB.clean_tasks(i))
 
 
 async def user_tasks(uid):
@@ -101,8 +100,8 @@ async def user_tasks(uid):
             break
     for i in data:
         for work in i["illusts"]:
-            tasks.append(Task("work", i))
-            tasks.append(Task("related", work["id"]))
+            tasks.append(Task("work", content=i))
+            tasks.append(Task("related", pxid=work["id"]))
     logger.info(f"发现{len(tasks)}个任务")
     return tasks
 
@@ -112,17 +111,18 @@ async def recommend_tasks(page):
     tasks = []
     data = await async_call(api.illust_recommended)
     for i in data["illusts"]:
-        tasks.append(Task("work", i))
-        tasks.append(Task("related", i["id"]))
+        tasks.append(Task("work", content=i))
+        tasks.append(Task("related", pxid=i["id"]))
     return tasks
 
 
 async def process_work(illust):
     await asyncio.sleep(random.random())
-    tasks = []
     # data = await async_call(api.illust_detail, ill_id)
     # if data is not None:
     # illust = ill_data["illust"]
+    if "id" not in illust:
+        return
     logger.info(f"开始处理 {illust['id']} {illust['title']}")
     # ID处理
 
@@ -164,7 +164,7 @@ async def process_work(illust):
         await DB.new_tag(**tag_db)
     logger.info(f"处理了{len(illust['tags'])}个tag")
     userid = illust["user"]["id"]
-    tasks.append(Task("user", illust["user"]["id"]))
+    await DB.submit_task(Task("user", pxid=illust["user"]["id"]))
     work_db = {
         "pxid": illust["id"],
         "title": illust["title"],
@@ -192,24 +192,21 @@ async def process_work(illust):
 
     logger.info(f"保存成功 {uuid} {illust['title']}")
 
-    for i in tasks:
-        task_queue.put(i)
-
 
 async def related_task(ill_id):
     await asyncio.sleep(random.random())
     tasks = []
     data = await async_call(api.illust_related, ill_id)
     for i in data["illusts"]:
-        tasks.append(Task("related", i["id"]))
+        tasks.append(Task("related", pxid=i["id"]))
     for i in range(2):
         params = api.parse_qs(data["next_url"])
         if params is not None:
             page = await async_call(api.illust_related, **params)
             logger.info("获取相关作品成功")
             for i in page["illusts"]:
-                tasks.append(Task("work", i))
-                tasks.append(Task("related", i["id"]))
+                tasks.append(Task("work", content=i))
+                tasks.append(Task("related", pxid=i["id"]))
         else:
             break
     return tasks
@@ -232,10 +229,10 @@ def async_call(fun, *args, **kwargs):
                 if data["error"]:
                     return None
                 return data
-            if "OAuth" in data["error"]["user_message"]:
+            if "OAuth" in data["error"]["message"]:
                 api.login(CONF.PIXIV_USER, CONF.PIXIV_PWD)
                 continue
-            if data["error"]["user_message"] == "该作品已被删除，或作品ID不存在。":
+            if data["error"]["user_message"] == "deleted":
                 logger.error("作品不存在")
                 return
             logger.error(data)

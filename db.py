@@ -2,12 +2,13 @@ import json
 
 import asyncpg
 import uuid
-import datetime
+import random
 
 from loguru import logger
 
 from conf import CONF
 import arrow
+from utils import Task
 
 
 def new_uuid():
@@ -106,3 +107,49 @@ class DB:
                 else:
                     cleaned.append(i)
             return cleaned
+
+    @classmethod
+    async def submit_task(cls, *task: Task):
+        async with cls.pool.acquire() as connection:
+            connection: asyncpg.Connection
+            await connection.set_type_codec(
+                'json',
+                encoder=json.dumps,
+                decoder=json.loads,
+                schema='pg_catalog'
+            )
+            for i in task:
+                await connection.execute("""INSERT INTO queue VALUES ($1,$2,$3,$4::json)""", new_uuid(), i.type,
+                                         i.pxid,
+                                         i.content)
+
+    @classmethod
+    async def get_task(cls):
+        connection: asyncpg.Connection = await cls.pool.acquire()
+        trans = connection.transaction()
+        await trans.start()
+        rows = await connection.fetch("""SELECT * FROM queue LIMIT 100""")
+        if len(rows) == 0:
+            await trans.rollback()
+            await cls.pool.release(connection)
+            return None, None
+        row = random.choice(rows)
+        await connection.execute("""SELECT * FROM queue WHERE id = $1 FOR UPDATE """, row["id"])
+        if row["content"] is not None:
+            content = json.loads(row["content"])
+        else:
+            content = None
+        task = Task(row["type"], content=content, pxid=row["pxid"])
+
+        async def __finish():
+            await connection.execute("""DELETE FROM queue WHERE id = $1""", row["id"])
+            await trans.commit()
+            await cls.pool.release(connection)
+
+        return task, __finish
+
+    @classmethod
+    async def count_task(cls):
+        async with cls.pool.acquire() as connection:
+            connection: asyncpg.Connection
+            return await connection.fetchval("SELECT count(*) FROM queue")
