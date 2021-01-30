@@ -34,7 +34,7 @@ async def main():
                 task_queue.put(i)
         bench = []
         logger.info(f"队列剩余{task_queue.qsize()}")
-        for i in range(4):
+        for i in range(3):
             task = task_queue.get_nowait()
             if task is None:
                 break
@@ -202,27 +202,27 @@ def async_call(fun, *args, **kwargs):
     def __wrapper():
         return fun(*args, **kwargs)
 
-        while True:
-            try:
-                data = __wrapper()
-            except Exception as e:
-                logger.error(e)
-                time.sleep(10)
-                continue
-            if "error" in data:
-                if isinstance(data["error"], bool):
-                    if data["error"]:
-                        return None
-                    return data
-                if data["error"]["user_message"] == "该作品已被删除，或作品ID不存在。":
-                    logger.error("作品不存在")
-                    return
-                logger.error(data)
-                logger.error("达到频率限制，sleep两分钟")
-                time.sleep(160)
-                continue
-                # api.login(CONF.PIXIV_USER, CONF.PIXIV_PWD)
-            return data
+    while True:
+        try:
+            data = __wrapper()
+        except Exception as e:
+            logger.error(e)
+            time.sleep(10)
+            continue
+        if "error" in data:
+            if isinstance(data["error"], bool):
+                if data["error"]:
+                    return None
+                return data
+            if data["error"]["user_message"] == "该作品已被删除，或作品ID不存在。":
+                logger.error("作品不存在")
+                return
+            logger.error(data)
+            logger.error("达到频率限制，sleep两分钟")
+            time.sleep(160)
+            continue
+            # api.login(CONF.PIXIV_USER, CONF.PIXIV_PWD)
+        return data
 
 
 if __name__ == '__main__':
