@@ -38,8 +38,8 @@ async def main():
             task = task_queue.get_nowait()
             if task is None:
                 break
-            if task.type == "work":
-                bench.append(works_tasks(task.content))
+            if task.type == "related":
+                bench.append(related_task(task.content))
                 continue
             if task.type == "user":
                 bench.append(user_tasks(task.content))
@@ -89,7 +89,6 @@ async def user_tasks(uid):
     data.append(page)
     for i in range(3):
         params = api.parse_qs(page["next_url"])
-        params = api.parse_qs(page["next_url"])
         if params is not None:
             page = await async_call(api.user_illusts, **params)
             data.append(page)
@@ -97,80 +96,83 @@ async def user_tasks(uid):
             break
     for i in data:
         for work in i["illusts"]:
-            tasks.append(Task("work", work["id"]))
+            await process_work(work)
+            tasks.append(Task("related", work["id"]))
     logger.info(f"发现{len(tasks)}个任务")
     return tasks
 
 
 async def recommend_tasks(page):
     tasks = []
-    data = api.illust_recommended()
+    data = await async_call(api.illust_recommended)
     for i in data["illusts"]:
-        tasks.append(Task("work", i["id"]))
+        await process_work(i)
+        # tasks.append(Task("related", i["id"]))
     return tasks
 
 
-async def works_tasks(ill_id):
+async def process_work(illust):
     tasks = []
-    data = await async_call(api.illust_detail, ill_id)
-    if data is not None:
-        illust = data["illust"]
-        logger.info(f"下载成功 {illust['id']} {illust['title']}")
-        # ID处理
-        for i in illust["tags"]:
-            if await DB.tag_exist(i['name']):
-                continue
-            tag_data = await async_call(
-                lambda: api.requests.get(
-                    f"https://www.pixiv.net/ajax/search/tags/{i['name']}?lang=zh").json())
-            if tag_data is None:
-                continue
-            body = tag_data["body"]
-            en = zh = ''
-            if body['tagTranslation']:
-                tran = body['tagTranslation'].get("name", {})
-                en = tran.get("en", "")
-                zh = tran.get("zh", "")
-            if body['pixpedia']:
-                tag_db = {"tag": body['tag'],
-                          'en': en,
-                          'zh': zh,
-                          'abstract': body['pixpedia'].get('abstract', None),
-                          'parent': body['pixpedia'].get('parentTag', None),
-                          'pxid': int(body['pixpedia'].get("id", 0)),
-                          'siblings': body['pixpedia'].get('siblingsTags', None),
-                          'children': body['pixpedia'].get('childrenTags', None),
-                          }
-            else:
-                tag_db = {"tag": body['tag'],
-                          'en': en,
-                          'zh': zh,
-                          'abstract': None,
-                          'parent': None,
-                          'pxid': None,
-                          'siblings': None,
-                          'children': None,
-                          }
-            await DB.new_tag(**tag_db)
-        logger.info(f"处理了{len(illust['tags'])}个tag")
-        userid = data["illust"]["user"]["id"]
-        tasks.append(Task("user", illust["user"]["id"]))
-        work_db = {
-            "pxid": illust["id"],
-            "title": illust["title"],
-            "work_type": illust["type"],
-            "caption": illust["caption"],
-            "user": userid,
-            "width": illust["width"],
-            "height": illust["height"],
-            "view": illust["total_view"],
-            "create_time": illust["create_date"],
-            "bookmark": illust["total_bookmarks"],
-            "page": illust["page_count"],
-            "url": illust["meta_single_page"].get("original_image_url", None)
-        }
-        uuid = await DB.new_work(**work_db)
+    # data = await async_call(api.illust_detail, ill_id)
+    # if data is not None:
+    # illust = ill_data["illust"]
+    # logger.info(f"下载成功 {illust['id']} {illust['title']}")
+    # ID处理
 
+    for i in illust["tags"]:
+        if await DB.tag_exist(i['name']):
+            continue
+        tag_data = await async_call(
+            lambda: api.requests.get(
+                f"https://www.pixiv.net/ajax/search/tags/{i['name']}?lang=zh").json())
+        if tag_data is None:
+            continue
+        body = tag_data["body"]
+        en = zh = ''
+        if body['tagTranslation']:
+            tran = body['tagTranslation'].get("name", {})
+            en = tran.get("en", "")
+            zh = tran.get("zh", "")
+        if body['pixpedia']:
+            tag_db = {"tag": body['tag'],
+                      'en': en,
+                      'zh': zh,
+                      'abstract': body['pixpedia'].get('abstract', None),
+                      'parent': body['pixpedia'].get('parentTag', None),
+                      'pxid': int(body['pixpedia'].get("id", 0)),
+                      'siblings': body['pixpedia'].get('siblingsTags', None),
+                      'children': body['pixpedia'].get('childrenTags', None),
+                      }
+        else:
+            tag_db = {"tag": body['tag'],
+                      'en': en,
+                      'zh': zh,
+                      'abstract': None,
+                      'parent': None,
+                      'pxid': None,
+                      'siblings': None,
+                      'children': None,
+                      }
+        await DB.new_tag(**tag_db)
+    logger.info(f"处理了{len(illust['tags'])}个tag")
+    userid = illust["user"]["id"]
+    tasks.append(Task("user", illust["user"]["id"]))
+    work_db = {
+        "pxid": illust["id"],
+        "title": illust["title"],
+        "work_type": illust["type"],
+        "caption": illust["caption"],
+        "user": userid,
+        "width": illust["width"],
+        "height": illust["height"],
+        "view": illust["total_view"],
+        "create_time": illust["create_date"],
+        "bookmark": illust["total_bookmarks"],
+        "page": illust["page_count"],
+        "url": illust["meta_single_page"].get("original_image_url", None)
+    }
+    uuid, status = await DB.new_work(**work_db)
+    if status:
         # 链接tag
         for i in illust["tags"]:
             tag_name = i["name"]
@@ -179,22 +181,29 @@ async def works_tasks(ill_id):
                 "tag": tag_name
             }
             await DB.work_tag(**work_tag)
-        logger.info(f"保存成功 {uuid} {illust['title']}")
 
-        data = await async_call(api.illust_related, illust["id"])
-        for i in data["illusts"]:
-            tasks.append(Task("work", i["id"]))
-        for i in range(3):
-            params = api.parse_qs(data["next_url"])
-            if params is not None:
-                page = await async_call(api.illust_related, **params)
-                logger.info("获取相关作品成功")
-                for i in page["illusts"]:
-                    tasks.append(Task("work", i["id"]))
-            else:
-                break
-        logger.info(f"发现了 {len(tasks)} 个任务")
-        return tasks
+    logger.info(f"保存成功 {uuid} {illust['title']}")
+
+    for i in tasks:
+        task_queue.put(i)
+
+
+async def related_task(ill_id):
+    tasks = []
+    data = await async_call(api.illust_related, ill_id)
+    for i in data["illusts"]:
+        tasks.append(Task("work", i["id"]))
+    for i in range(3):
+        params = api.parse_qs(data["next_url"])
+        if params is not None:
+            page = await async_call(api.illust_related, **params)
+            logger.info("获取相关作品成功")
+            for i in page["illusts"]:
+                await process_work(i)
+                tasks.append(Task("related", i["id"]))
+        else:
+            break
+    return tasks
 
 
 @async_in_pool

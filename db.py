@@ -4,6 +4,7 @@ import asyncpg
 import uuid
 import datetime
 from conf import CONF
+import arrow
 
 
 def new_uuid():
@@ -50,16 +51,17 @@ class DB:
             res = await connection.fetchrow("""SELECT * FROM works WHERE "works"."pxid" = $1 LIMIT 1""", pxid)
             if res is None:
                 work_uuid = new_uuid()
-                create_time = datetime.datetime.fromisoformat(create_time)
+                # create_time = datetime.datetime.strptime(create_time, "%Y-%m-%dT%H:%M:%S%z")
+                create_time = arrow.get(create_time).datetime
                 await connection.execute("""
                     INSERT INTO works VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) 
                   """, work_uuid, pxid, title, create_time, work_type, caption,
                                          width, height, view, bookmark,
                                          page,
                                          url, user)
-                return work_uuid
+                return work_uuid, True
             else:
-                return res["id"]
+                return res["id"], False
 
     @classmethod
     async def new_user(cls, name, pxid, account, comment, avatar, webpage, follow, illusts, manga, novels, bookmarks,
