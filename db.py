@@ -3,6 +3,9 @@ import json
 import asyncpg
 import uuid
 import datetime
+
+from loguru import logger
+
 from conf import CONF
 import arrow
 
@@ -98,6 +101,8 @@ class DB:
                                                     i.content["id"])
                     if res is None:
                         cleaned.append(i)
+                    else:
+                        logger.warning(f"跳过作品{i.content['title']}")
                 else:
                     cleaned.append(i)
             return cleaned

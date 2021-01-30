@@ -5,6 +5,7 @@ from db import DB
 from loguru import logger
 from pixivpy3 import ByPassSniApi, AppPixivAPI
 import time
+import random
 from conf import CONF
 from utils import async_in_pool
 
@@ -57,6 +58,7 @@ async def main():
 
 
 async def user_tasks(uid):
+    await asyncio.sleep(random.random())
     tasks = []
     data = []
     user_info = api.user_detail(uid)
@@ -106,6 +108,7 @@ async def user_tasks(uid):
 
 
 async def recommend_tasks(page):
+    await asyncio.sleep(random.random())
     tasks = []
     data = await async_call(api.illust_recommended)
     for i in data["illusts"]:
@@ -115,6 +118,7 @@ async def recommend_tasks(page):
 
 
 async def process_work(illust):
+    await asyncio.sleep(random.random())
     tasks = []
     # data = await async_call(api.illust_detail, ill_id)
     # if data is not None:
@@ -124,6 +128,7 @@ async def process_work(illust):
 
     for i in illust["tags"]:
         if await DB.tag_exist(i['name']):
+            logger.warning(f"跳过tag{i['name']}")
             continue
         tag_data = await async_call(
             lambda: api.requests.get(
@@ -192,11 +197,12 @@ async def process_work(illust):
 
 
 async def related_task(ill_id):
+    await asyncio.sleep(random.random())
     tasks = []
     data = await async_call(api.illust_related, ill_id)
     for i in data["illusts"]:
         tasks.append(Task("related", i["id"]))
-    for i in range(3):
+    for i in range(2):
         params = api.parse_qs(data["next_url"])
         if params is not None:
             page = await async_call(api.illust_related, **params)
