@@ -34,7 +34,7 @@ async def main():
                 task_queue.put(i)
         bench = []
         logger.info(f"队列剩余{task_queue.qsize()}")
-        for i in range(3):
+        for i in range(4):
             task = task_queue.get_nowait()
             if task is None:
                 break
@@ -47,6 +47,8 @@ async def main():
 
         results = await asyncio.gather(*bench)
         for i in results:
+            if i is None:
+                break
             for task in await DB.clean_tasks(i):
                 task_queue.put(task)
 
@@ -57,7 +59,7 @@ async def user_tasks(uid):
     user_info = api.user_detail(uid)
     user_db = {
         "name": user_info["user"]["name"],
-        "pxid": user_info["user"]["pxid"],
+        "pxid": user_info["user"]["id"],
         "account": user_info["user"]["account"],
         "avatar": user_info["user"]["profile_image_urls"].get('medium', None),
         "comment": user_info["user"]["comment"],
@@ -79,7 +81,6 @@ async def user_tasks(uid):
         params = api.parse_qs(page["next_url"])
         if params is not None:
             page = await async_call(api.user_bookmarks_illust, **params)
-            logger.info(page)
             data.append(page)
         else:
             break
@@ -88,9 +89,9 @@ async def user_tasks(uid):
     data.append(page)
     for i in range(3):
         params = api.parse_qs(page["next_url"])
+        params = api.parse_qs(page["next_url"])
         if params is not None:
             page = await async_call(api.user_illusts, **params)
-            logger.info(page)
             data.append(page)
         else:
             break
@@ -117,14 +118,19 @@ async def works_tasks(ill_id):
         logger.info(f"下载成功 {illust['id']} {illust['title']}")
         # ID处理
         for i in illust["tags"]:
+            if await DB.tag_exist(i['name']):
+                continue
             tag_data = await async_call(
                 lambda: api.requests.get(
                     f"https://www.pixiv.net/ajax/search/tags/{i['name']}?lang=zh").json())
+            if tag_data is None:
+                continue
             body = tag_data["body"]
             en = zh = ''
             if body['tagTranslation']:
-                en = body['tagTranslation'][i['name']].get("en", "")
-                zh = body['tagTranslation'][i['name']].get("zh", "")
+                tran = body['tagTranslation'].get("name", {})
+                en = tran.get("en", "")
+                zh = tran.get("zh", "")
             if body['pixpedia']:
                 tag_db = {"tag": body['tag'],
                           'en': en,
@@ -196,11 +202,17 @@ def async_call(fun, *args, **kwargs):
     def __wrapper():
         return fun(*args, **kwargs)
 
-    try:
         while True:
-            data = __wrapper()
+            try:
+                data = __wrapper()
+            except Exception as e:
+                logger.error(e)
+                time.sleep(10)
+                continue
             if "error" in data:
-                if not data["error"]:
+                if isinstance(data["error"], bool):
+                    if data["error"]:
+                        return None
                     return data
                 if data["error"]["user_message"] == "该作品已被删除，或作品ID不存在。":
                     logger.error("作品不存在")
@@ -208,11 +220,9 @@ def async_call(fun, *args, **kwargs):
                 logger.error(data)
                 logger.error("达到频率限制，sleep两分钟")
                 time.sleep(160)
-                api.login(CONF.PIXIV_USER, CONF.PIXIV_PWD)
+                continue
+                # api.login(CONF.PIXIV_USER, CONF.PIXIV_PWD)
             return data
-    except Exception as e:
-        logger.error(e)
-        time.sleep(10)
 
 
 if __name__ == '__main__':

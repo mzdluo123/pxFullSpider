@@ -18,6 +18,8 @@ class DB:
 
     @classmethod
     async def new_tag(cls, tag, en, zh, abstract, parent, pxid, siblings, children):
+        if await DB.tag_exist(tag):
+            return
         async with cls.pool.acquire() as connection:
             connection: asyncpg.Connection
             await connection.set_type_codec(
@@ -26,11 +28,18 @@ class DB:
                 decoder=json.loads,
                 schema='pg_catalog'
             )
-            res = await connection.fetch("""SELECT * FROM tag WHERE tag.tag = $1 LIMIT 1""", tag)
-            if len(res) == 0:
-                await connection.execute("""
-                    INSERT INTO tag VALUES ($1,$2,$3,$4,$5,$6,$7,$8::json,$9::json)
-                  """, new_uuid(), tag, en, zh, abstract, parent, pxid, siblings, children)
+            await connection.execute("""
+                INSERT INTO tag VALUES ($1,$2,$3,$4,$5,$6,$7,$8::json,$9::json)
+              """, new_uuid(), tag, en, zh, abstract, parent, pxid, siblings, children)
+
+    @classmethod
+    async def tag_exist(cls, tag):
+        async with cls.pool.acquire() as connection:
+            connection: asyncpg.Connection
+            res = await connection.fetchrow("""SELECT * FROM tag WHERE tag.tag = $1 LIMIT 1""", tag)
+            if res is None:
+                return False
+            return True
 
     @classmethod
     async def new_work(cls, pxid, title, create_time, work_type, caption, user, width, height, view, bookmark, page,
