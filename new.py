@@ -116,7 +116,7 @@ async def process_work(illust):
     # data = await async_call(api.illust_detail, ill_id)
     # if data is not None:
     # illust = ill_data["illust"]
-    # logger.info(f"下载成功 {illust['id']} {illust['title']}")
+    logger.info(f"开始处理 {illust['id']} {illust['title']}")
     # ID处理
 
     for i in illust["tags"]:
@@ -130,7 +130,7 @@ async def process_work(illust):
         body = tag_data["body"]
         en = zh = ''
         if body['tagTranslation']:
-            tran = body['tagTranslation'].get("name", {})
+            tran = body['tagTranslation'].get(body["tag"], {})
             en = tran.get("en", "")
             zh = tran.get("zh", "")
         if body['pixpedia']:
