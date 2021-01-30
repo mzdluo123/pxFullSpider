@@ -27,7 +27,8 @@ async def main():
             for i in await DB.clean_tasks(tasks):
                 await DB.submit_task(i)
         bench = []
-        logger.info(f"队列剩余{await DB.count_task()}")
+        remain = await DB.count_task()
+        logger.info(f"队列剩余{remain}")
         for i in range(3):
 
             async def __job():
@@ -35,14 +36,15 @@ async def main():
                 if task is None:
                     return
                 logger.info(f"处理任务 {task.type}")
+
                 if task.type == "related":
-                    await related_task(task.pxid)
+                    res = await related_task(task.pxid)
                     await finish()
-                    return
+                    return res
                 if task.type == "user":
-                    await user_tasks(task.pxid)
+                    res = await user_tasks(task.pxid)
                     await finish()
-                    return
+                    return res
                 if task.type == "work":
                     await process_work(task.content)
                     await finish()
@@ -60,7 +62,7 @@ async def user_tasks(uid):
     await asyncio.sleep(random.random())
     tasks = []
     data = []
-    user_info = api.user_detail(uid)
+    user_info = await async_call(api.user_detail, uid)
     user_db = {
         "name": user_info["user"]["name"],
         "pxid": user_info["user"]["id"],
@@ -100,7 +102,7 @@ async def user_tasks(uid):
             break
     for i in data:
         for work in i["illusts"]:
-            tasks.append(Task("work", content=i))
+            tasks.append(Task("work", content=work))
             tasks.append(Task("related", pxid=work["id"]))
     logger.info(f"发现{len(tasks)}个任务")
     return tasks
