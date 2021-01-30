@@ -44,6 +44,9 @@ async def main():
             if task.type == "user":
                 bench.append(user_tasks(task.content))
                 continue
+            if task.type == "work":
+                bench.append(process_work(task.content))
+                continue
 
         results = await asyncio.gather(*bench)
         for i in results:
@@ -96,7 +99,7 @@ async def user_tasks(uid):
             break
     for i in data:
         for work in i["illusts"]:
-            await process_work(work)
+            tasks.append(Task("work", i))
             tasks.append(Task("related", work["id"]))
     logger.info(f"发现{len(tasks)}个任务")
     return tasks
@@ -106,8 +109,8 @@ async def recommend_tasks(page):
     tasks = []
     data = await async_call(api.illust_recommended)
     for i in data["illusts"]:
-        await process_work(i)
-        # tasks.append(Task("related", i["id"]))
+        tasks.append(Task("work", i))
+        tasks.append(Task("related", i["id"]))
     return tasks
 
 
@@ -171,16 +174,16 @@ async def process_work(illust):
         "page": illust["page_count"],
         "url": illust["meta_single_page"].get("original_image_url", None)
     }
-    uuid, status = await DB.new_work(**work_db)
-    if status:
-        # 链接tag
-        for i in illust["tags"]:
-            tag_name = i["name"]
-            work_tag = {
-                "work_uuid": uuid,
-                "tag": tag_name
-            }
-            await DB.work_tag(**work_tag)
+    uuid = await DB.new_work(**work_db)
+
+    # 链接tag
+    for i in illust["tags"]:
+        tag_name = i["name"]
+        work_tag = {
+            "work_uuid": uuid,
+            "tag": tag_name
+        }
+        await DB.work_tag(**work_tag)
 
     logger.info(f"保存成功 {uuid} {illust['title']}")
 
@@ -192,14 +195,14 @@ async def related_task(ill_id):
     tasks = []
     data = await async_call(api.illust_related, ill_id)
     for i in data["illusts"]:
-        tasks.append(Task("work", i["id"]))
+        tasks.append(Task("related", i["id"]))
     for i in range(3):
         params = api.parse_qs(data["next_url"])
         if params is not None:
             page = await async_call(api.illust_related, **params)
             logger.info("获取相关作品成功")
             for i in page["illusts"]:
-                await process_work(i)
+                tasks.append(Task("work", i))
                 tasks.append(Task("related", i["id"]))
         else:
             break
@@ -223,6 +226,9 @@ def async_call(fun, *args, **kwargs):
                 if data["error"]:
                     return None
                 return data
+            if "OAuth" in data["error"]["user_message"]:
+                api.login(CONF.PIXIV_USER, CONF.PIXIV_PWD)
+                continue
             if data["error"]["user_message"] == "该作品已被删除，或作品ID不存在。":
                 logger.error("作品不存在")
                 return

@@ -59,9 +59,9 @@ class DB:
                                          width, height, view, bookmark,
                                          page,
                                          url, user)
-                return work_uuid, True
+                return work_uuid
             else:
-                return res["id"], False
+                return res["id"]
 
     @classmethod
     async def new_user(cls, name, pxid, account, comment, avatar, webpage, follow, illusts, manga, novels, bookmarks,
@@ -93,9 +93,9 @@ class DB:
             if work_list is None:
                 return
             for i in work_list:
-                if i.type == "work":
+                if i.type == "work" and "id" in i.content:
                     res = await connection.fetchrow("""SELECT * FROM works WHERE "works"."pxid" = $1 LIMIT 1""",
-                                                    i.content)
+                                                    i.content["id"])
                     if res is None:
                         cleaned.append(i)
                 else:
