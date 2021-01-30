@@ -11,7 +11,7 @@ executor = ThreadPoolExecutor(32)
 def async_in_pool(func: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     @wraps(func)
     async def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        logger.debug(f"run {func} in pool")
+        # logger.debug(f"run {func} in pool")
         loop = asyncio.get_running_loop()
         pfunc = partial(func, *args, **kwargs)
         result = await loop.run_in_executor(executor, pfunc)
