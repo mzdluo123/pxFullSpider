@@ -3,6 +3,7 @@ import json
 import asyncpg
 import uuid
 import datetime
+from conf import CONF
 
 
 def new_uuid():
@@ -14,7 +15,7 @@ class DB:
 
     @classmethod
     async def init_db(cls):
-        cls.pool = await asyncpg.create_pool("postgresql://postgres:admin@localhost/pixiv")
+        cls.pool = await asyncpg.create_pool(f"postgresql://{CONF.DB_USER}:{CONF.DB_PWD}@{CONF.DB_Host}/{CONF.DB_NAME}")
 
     @classmethod
     async def new_tag(cls, tag, en, zh, abstract, parent, pxid, siblings, children):
@@ -49,7 +50,7 @@ class DB:
             res = await connection.fetchrow("""SELECT * FROM works WHERE "works"."pxid" = $1 LIMIT 1""", pxid)
             if res is None:
                 work_uuid = new_uuid()
-                create_time = datetime.datetime.strptime(create_time, "%Y-%m-%dT%H:%M:%S%z")
+                create_time = datetime.datetime.fromisoformat(create_time)
                 await connection.execute("""
                     INSERT INTO works VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) 
                   """, work_uuid, pxid, title, create_time, work_type, caption,

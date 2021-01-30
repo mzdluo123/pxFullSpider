@@ -12,7 +12,6 @@ class Conf:
         self.DB_PWD = _data["dbPwd"]
         self.PIXIV_USER = _data["pixivUser"]
         self.PIXIV_PWD = _data["pixivPwd"]
-        self.KAFKA_SERVER = _data["kafkaServer"]
 
 
 CONF = Conf()
